@@ -21,7 +21,7 @@ def sendToSteamVR(text):
 def main():
     #this file is just for pipe testing purposes
     sendToSteamVR("settings 5 2")
-    assert 0
+    # assert 0
 
     pipe = open(r'\\.\pipe\ApriltagPipeIn', 'rb+', buffering=0)
 
