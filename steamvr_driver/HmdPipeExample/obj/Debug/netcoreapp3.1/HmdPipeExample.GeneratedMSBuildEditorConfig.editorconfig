@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = HmdPipeExample
+build_property.ProjectDir = C:\Users\marti\Mediapipe\Mediapipe-VR-Fullbody-Tracking\steamvr_driver\HmdPipeExample\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

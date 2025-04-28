@@ -147,7 +147,7 @@ def main() -> None:
         logging.error(f"Failed to start GUI thread: {e}")
 
     # --- MediaPipe Holistic Setup ---
-    holistic: Optional[mp_holistic.Holistic] = None # Use holistic variable
+    holistic: Optional[mp_holistic.Holistic] = None # type: ignore # Use holistic variable
     try:
         logging.info("Starting Holistic detector...")
         holistic = mp_holistic.Holistic(
