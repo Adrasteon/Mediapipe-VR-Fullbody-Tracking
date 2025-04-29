@@ -1,7 +1,9 @@
-opencv-python
-numpy
-scipy
-mediapipe
-python-osc
-pyinstaller
-flask
+opencv-python>=4.8.1.78
+numpy>=1.24.4
+scipy>=1.11.3
+mediapipe>=0.10.8
+python-osc>=1.9.0
+pyinstaller>=6.3.0
+flask>=3.0.0
+pynput>=1.7.6
+

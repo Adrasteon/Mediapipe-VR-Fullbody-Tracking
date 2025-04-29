@@ -5,6 +5,7 @@ Main application script for MediaPipe-based full-body tracking.
 Initializes camera, pose detection (using Holistic model), GUI, web UI,
 and backend communication (SteamVR or VRChat OSC) to translate webcam pose
 estimation into VR tracking data. Includes flags to enable/disable hand and face tracking processing.
+Includes optional keyboard head rotation control for SteamVR.
 """
 
 import os
@@ -18,7 +19,12 @@ from typing import Optional, Tuple, Dict, Any # For type hinting
 import cv2
 import mediapipe as mp
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+try:
+    from scipy.spatial.transform import Rotation as R
+except ImportError:
+    print("ERROR: Scipy not found. Please install it: pip install scipy")
+    sys.exit(1)
+
 
 # Ensure the current directory is in the path for embedded Python
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -29,14 +35,16 @@ if script_dir not in sys.path:
 try:
     # Import pose processing and hand processing functions from helpers
     from helpers import (CameraStream, shutdown, mediapipeTo3dpose,
-                         get_rot_mediapipe, get_rot, process_holistic_hands) # Added process_holistic_hands
+                         get_rot_mediapipe, get_rot, process_holistic_hands,
+                         sendToSteamVR) # Added sendToSteamVR for keyboard control
     from backends import DummyBackend, SteamVRBackend, VRChatOSCBackend, Backend
     import webui
     import inference_gui
     import parameters
+    import keyboard_helper # Import the keyboard helper module
 except ImportError as e:
     print(f"ERROR: Failed to import local modules: {e}")
-    print("Ensure all required .py files (helpers.py, backends.py, etc.) are in the same directory or in the Python path.")
+    print("Ensure all required .py files (helpers.py, backends.py, keyboard_helper.py, etc.) are in the same directory or in the Python path.")
     sys.exit(1)
 
 
@@ -64,6 +72,14 @@ def main() -> None:
         if not hasattr(params, 'use_face'):
             logging.warning("Parameter 'use_face' not found, defaulting to False.")
             params.use_face = False
+        # Add placeholder attributes for keyboard control if not in parameters.py yet
+        if not hasattr(params, 'keyboard_head_control_enabled'):
+            logging.warning("Parameter 'keyboard_head_control_enabled' not found, defaulting to False.")
+            params.keyboard_head_control_enabled = False
+        if not hasattr(params, 'keyboard_head_control_speed'):
+             logging.warning("Parameter 'keyboard_head_control_speed' not found, defaulting to 1.5.")
+             params.keyboard_head_control_speed = 1.5
+
     except Exception as e:
         logging.error(f"Failed during parameter initialization: {e}")
         # Attempt graceful shutdown even if params partially failed
@@ -146,6 +162,16 @@ def main() -> None:
     except Exception as e:
         logging.error(f"Failed to start GUI thread: {e}")
 
+    # --- Keyboard Helper Setup ---
+    try:
+        keyboard_helper.start_keyboard_listener()
+        # Set initial state based on parameters
+        keyboard_helper.set_keyboard_control_enabled(params.keyboard_head_control_enabled)
+        keyboard_helper.set_keyboard_rotation_speed(params.keyboard_head_control_speed)
+    except Exception as e:
+        logging.error(f"Failed to start keyboard listener: {e}")
+        # Continue without keyboard control if it fails
+
     # --- MediaPipe Holistic Setup ---
     holistic: Optional[mp_holistic.Holistic] = None # type: ignore # Use holistic variable
     try:
@@ -163,6 +189,7 @@ def main() -> None:
         logging.error(f"Failed to initialize MediaPipe Holistic: {e}")
         if camera_thread: camera_thread.stop()
         if backend: backend.disconnect()
+        keyboard_helper.stop_keyboard_listener() # Stop keyboard listener on error
         shutdown(params, exit_code=1)
         return
 
@@ -173,6 +200,7 @@ def main() -> None:
         if holistic: holistic.close()
         if camera_thread: camera_thread.stop()
         if backend: backend.disconnect()
+        keyboard_helper.stop_keyboard_listener() # Stop keyboard listener on error
         shutdown(params, exit_code=1)
         return
 
@@ -180,6 +208,10 @@ def main() -> None:
     # --- Main Loop ---
     prev_smoothing = params.smoothing
     prev_add_smoothing = params.additional_smoothing
+    # Track previous keyboard parameter states
+    prev_keyboard_enabled = params.keyboard_head_control_enabled
+    prev_keyboard_speed = params.keyboard_head_control_speed
+
     last_log_time = time.time()
 
     logging.info("Starting main loop...")
@@ -188,6 +220,7 @@ def main() -> None:
             loop_start_time = time.perf_counter()
 
             # --- Parameter Change Check ---
+            # Smoothing
             if prev_smoothing != params.smoothing or prev_add_smoothing != params.additional_smoothing:
                 logging.info(f"Smoothing changed: Window={params.smoothing:.2f}, Additional={params.additional_smoothing:.2f}")
                 prev_smoothing = params.smoothing
@@ -196,6 +229,16 @@ def main() -> None:
                     backend.onparamchanged(params)
                 except Exception as e:
                     logging.error(f"Error calling backend.onparamchanged: {e}")
+
+            # Keyboard Control Parameters
+            if hasattr(params, 'keyboard_head_control_enabled') and prev_keyboard_enabled != params.keyboard_head_control_enabled:
+                prev_keyboard_enabled = params.keyboard_head_control_enabled
+                keyboard_helper.set_keyboard_control_enabled(prev_keyboard_enabled)
+
+            if hasattr(params, 'keyboard_head_control_speed') and prev_keyboard_speed != params.keyboard_head_control_speed:
+                 prev_keyboard_speed = params.keyboard_head_control_speed
+                 keyboard_helper.set_keyboard_rotation_speed(prev_keyboard_speed)
+
 
             # --- Get Frame ---
             img: Optional[np.ndarray] = camera_thread.get_frame()
@@ -238,6 +281,72 @@ def main() -> None:
                     logging.warning(f"cv2.imshow/waitKey error while paused: {e}")
                     params.exit_ready = True
                 continue
+
+            # --- Apply Keyboard Head Rotation (SteamVR Only) ---
+            if keyboard_helper.is_keyboard_control_enabled() and params.backend == 1:
+                # Get deltas accumulated since last loop iteration
+                yaw_deg, pitch_deg, roll_deg = keyboard_helper.get_and_reset_keyboard_deltas()
+
+                if yaw_deg != 0.0 or pitch_deg != 0.0 or roll_deg != 0.0:
+                    try:
+                        # 1. Get current HMD pose from SteamVR
+                        hmd_pose_str = sendToSteamVR("getdevicepose 0", num_tries=1, wait_time=0.01)
+                        if hmd_pose_str and not hmd_pose_str[0].startswith("error"):
+                            parts = hmd_pose_str[0].split()
+                            # Adapt parsing based on actual driver output format
+                            try:
+                                current_hmd_pos = [float(p) for p in parts[3:6]]
+                                # Assuming driver outputs W, X, Y, Z quaternion
+                                current_hmd_rot_quat_wxyz = [float(q) for q in parts[6:10]]
+                            except (IndexError, ValueError) as parse_err:
+                                 logging.warning(f"Could not parse HMD pose string: '{hmd_pose_str[0]}'. Error: {parse_err}")
+                                 continue # Skip this rotation update
+
+                            # 2. Create rotation objects
+                            # Convert SteamVR WXYZ to Scipy XYZW: [x, y, z, w]
+                            current_rot_quat_xyzw = [
+                                current_hmd_rot_quat_wxyz[1],
+                                current_hmd_rot_quat_wxyz[2],
+                                current_hmd_rot_quat_wxyz[3],
+                                current_hmd_rot_quat_wxyz[0]
+                            ]
+                            # Check for invalid quaternion before creating Rotation object
+                            if np.isclose(np.linalg.norm(current_rot_quat_xyzw), 0.0):
+                                logging.warning("Current HMD quaternion from driver is zero. Skipping keyboard rotation.")
+                                continue
+                            current_rot = R.from_quat(current_rot_quat_xyzw)
+
+                            # 3. Create delta rotation (Yaw around Y, Pitch around X, Roll around Z)
+                            # Euler sequence 'yxz' is common for head rotation (Yaw first, then Pitch, then Roll)
+                            delta_rot = R.from_euler('yxz', [yaw_deg, pitch_deg, roll_deg], degrees=True)
+
+                            # 4. Combine rotations: Apply keyboard delta to the current HMD rotation
+                            new_rot = delta_rot * current_rot # Apply delta in the HMD's local frame
+
+                            # 5. Get new quaternion in SteamVR format (W, X, Y, Z)
+                            new_rot_quat_xyzw = new_rot.as_quat() # Scipy gives [x, y, z, w]
+                            new_rot_quat_wxyz = [
+                                new_rot_quat_xyzw[3], # w
+                                new_rot_quat_xyzw[0], # x
+                                new_rot_quat_xyzw[1], # y
+                                new_rot_quat_xyzw[2]  # z
+                            ]
+
+                            # 6. Send update command (only rotation changes)
+                            update_cmd = (f"updatepose 0 {current_hmd_pos[0]:.4f} {current_hmd_pos[1]:.4f} {current_hmd_pos[2]:.4f} "
+                                          f"{new_rot_quat_wxyz[0]:.4f} {new_rot_quat_wxyz[1]:.4f} {new_rot_quat_wxyz[2]:.4f} {new_rot_quat_wxyz[3]:.4f} "
+                                          f"0.0 0.0") # Latency, smoothing
+                            sendToSteamVR(update_cmd, num_tries=1, wait_time=0.01)
+                            # logging.debug(f"Applied keyboard rotation: Yaw={yaw_deg}, Pitch={pitch_deg}, Roll={roll_deg}")
+
+                        else:
+                            # Log only occasionally if HMD pose cannot be retrieved
+                            # logging.warning(f"Could not get HMD pose for keyboard rotation: {hmd_pose_str}")
+                            pass
+                    except Exception as e:
+                        logging.error(f"Error applying keyboard rotation: {e}", exc_info=True)
+            # --- End Keyboard Head Rotation ---
+
 
             # --- Holistic Estimation ---
             t_start = time.perf_counter()
@@ -401,6 +510,10 @@ def main() -> None:
         if backend:
             logging.info("Disconnecting backend...")
             backend.disconnect()
+        # Stop keyboard listener during cleanup
+        logging.info("Stopping keyboard listener...")
+        keyboard_helper.stop_keyboard_listener()
+
         logging.info("Destroying OpenCV windows...")
         cv2.destroyAllWindows()
 

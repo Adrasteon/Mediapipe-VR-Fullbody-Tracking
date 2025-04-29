@@ -1,76 +1,185 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>FlaskApp</title>
+	<meta charset="UTF-8">
+	<title>MediaPipe VR Tracker Control</title>
+	<style>
+		body {
+			font-family: sans-serif;
+			margin: 20px;
+		}
+		h1, h2 {
+			border-bottom: 1px solid #ccc;
+			padding-bottom: 5px;
+		}
+		.form-button {
+			width: 100px; /* Adjusted width for better layout */
+			height: 40px;
+			margin: 5px;
+			font-size: 1em;
+		}
+		.wide-button {
+			width: 210px; /* Adjusted width */
+			height: 40px;
+			margin: 5px;
+			font-size: 1em;
+		}
+		.form-inline {
+		  display: flex;
+		  flex-flow: row wrap;
+		  align-items: center;
+		  margin-bottom: 15px; /* Added margin between sections */
+		}
+		.form-inline p {
+			margin: 5px 10px 5px 0; /* Consistent spacing */
+		}
+		.form-group {
+			margin-bottom: 15px;
+			padding: 10px;
+			border: 1px solid #eee;
+			border-radius: 5px;
+		}
+		.form-group label {
+			margin-right: 10px;
+			font-weight: bold;
+		}
+		.slider-container {
+			display: flex;
+			align-items: center;
+		}
+		.slider-container input[type="range"] {
+			flex-grow: 1;
+			margin: 0 10px;
+		}
+		.slider-container span {
+			min-width: 40px; /* Ensure space for value display */
+			text-align: right;
+		}
+	</style>
 </head>
-<style>
-  
-.form-button {
-	width: 200px;
-	height: 50px;
-	margin: 10px;}
-	
-.wide-button {
-	width: 400px;
-	height: 50px;
-	margin: 10px;}
-	
-.form-inline {
-  display: flex;
-  flex-flow: row wrap;
-  align-items: center;
-  margin: 0px;
-}
-  
-</style>
 <body>
-    <h1>Hello {{name}}!</h1>
-    <h2>Update rotation Y</h2>
+	<h1>Hello {{name}}! - Tracker Control</h1>
+
+	<!-- Rotation Controls -->
+	<div class="form-group">
+		<h2>Rotation (Y: {{rot_y}}, X: {{rot_x}}, Z: {{rot_z}})</h2>
 		<form action = "/roty" method = "post" class="form-inline">
-			
-			<p><input class="form-button" type = "submit" name = "action" value = "<<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = "<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">>" /></p>
+			<p>Y:</p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<<" title="-10 Degrees" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<" title="-1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">" title="+1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">>" title="+10 Degrees" /></p>
 		</form>
-	<h2>Update rotation X</h2>
 		<form action = "/rotx" method = "post" class="form-inline">
-			
-			<p><input class="form-button" type = "submit" name = "action" value = "<<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = "<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">>" /></p>
+			<p>X:</p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<<" title="-10 Degrees" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<" title="-1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">" title="+1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">>" title="+10 Degrees" /></p>
 		</form>
-	<h2>Update rotation Z</h2>
 		<form action = "/rotz" method = "post" class="form-inline">
-			
-			<p><input class="form-button" type = "submit" name = "action" value = "<<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = "<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">>" /></p>
+			<p>Z:</p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<<" title="-10 Degrees" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<" title="-1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">" title="+1 Degree" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">>" title="+10 Degrees" /></p>
 		</form>
-	<h2>Update Scale</h2>
+	</div>
+
+	<!-- Scale Control -->
+	<div class="form-group">
+		<h2>Scale (Current: {{scale}})</h2>
 		<form action = "/scale" method = "post" class="form-inline">
-			
-			<p><input class="form-button" type = "submit" name = "action" value = "<<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = "<" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">" /></p>
-			<p><input class="form-button" type = "submit" name = "action" value = ">>" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<<" title="-0.1" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = "<" title="-0.01" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">" title="+0.01" /></p>
+			<p><input class="form-button" type = "submit" name = "action" value = ">>" title="+0.1" /></p>
 		</form>
-	
-		<form action = "/autocalib" method = "post" class="form-inline">
-			<p><input class="wide-button" type = "submit" value = "Autocalibrate" /></p>	
-		</form>
-		
-	<h2>Update Smoothing</h2>	
+	</div>
+
+	<!-- Smoothing Control -->
+	<div class="form-group">
+		<h2>Smoothing</h2>
 		<form action = "/smoothing" method = "post" class="form-inline">
 			 <p>Additional smoothing:</p>
 			 <p><input type = "text" name = "value" value="{{smooth}}" class="form-button" /></p>
 			 <p><input type = "submit" value = "Update" class="form-button" name = "action" /></p>
-			 <p><input class="form-button" type = "submit" name = "action" value = "<" /></p>
-			 <p><input class="form-button" type = "submit" name = "action" value = ">" /></p>
+			 <p><input class="form-button" type = "submit" name = "action" value = "<" title="-0.1" /></p>
+			 <p><input class="form-button" type = "submit" name = "action" value = ">" title="+0.1" /></p>
 		 </form>
-	
+	</div>
+
+	<!-- Keyboard Head Control -->
+	<div class="form-group">
+		<h2>Keyboard Head Control</h2>
+		<div class="form-inline">
+			<label for="keyboard-enabled">Enable:</label>
+			<input type="checkbox" id="keyboard-enabled" onchange="updateKeyboardControl()" {% if keyboard_enabled %}checked{% endif %}>
+		</div>
+		<div class="form-inline slider-container">
+			<label for="keyboard-speed">Rotation Speed:</label>
+			<input type="range" id="keyboard-speed" min="0.5" max="5.0" step="0.1" value="{{ keyboard_speed }}" oninput="updateKeyboardControl()">
+			<span id="keyboard-speed-value">{{ keyboard_speed }}</span> <!-- Display current value -->
+		</div>
+	</div>
+
+	<!-- Autocalibrate Button -->
+	<div class="form-group">
+		<h2>Calibration</h2>
+		<form action = "/autocalib" method = "post" class="form-inline">
+			<p><input class="wide-button" type = "submit" value = "Autocalibrate" /></p>
+		</form>
+	</div>
+
+<script>
+	// Function to update keyboard control settings via fetch API
+	function updateKeyboardControl() {
+		var enabled = document.getElementById("keyboard-enabled").checked;
+		var speed = parseFloat(document.getElementById("keyboard-speed").value);
+
+		// Update the displayed speed value
+		document.getElementById("keyboard-speed-value").textContent = speed.toFixed(1);
+
+		// Send data to the backend
+		fetch('/keyboard_control_update', {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json' // Important: Set content type to JSON
+			},
+			// Send data as a JSON string
+			body: JSON.stringify({ enabled: enabled, speed: speed })
+		})
+		.then(response => {
+			if (!response.ok) {
+				// Log error if response status is not OK
+				console.error('Error updating keyboard control. Status:', response.status);
+				return response.json().then(err => { throw new Error(err.message || 'Unknown error'); });
+			}
+			return response.json(); // Parse JSON response
+		})
+		.then(data => {
+			if (data.status === 'success') {
+				console.log('Keyboard control updated successfully.');
+				// Optionally provide user feedback here
+			} else {
+				console.error('Failed to update keyboard control:', data.message);
+				// Optionally provide user feedback here
+			}
+		})
+		.catch(error => {
+			// Handle network errors or JSON parsing errors
+			console.error('Error sending keyboard control update:', error);
+			// Optionally provide user feedback here
+		});
+	}
+
+	// Initialize the displayed speed value on page load
+	document.addEventListener('DOMContentLoaded', (event) => {
+		var initialSpeed = parseFloat(document.getElementById("keyboard-speed").value);
+		document.getElementById("keyboard-speed-value").textContent = initialSpeed.toFixed(1);
+	});
+
+</script>
+
 </body>
 </html>

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("HmdPipeExample")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+17755e9a84f117e011a5ae57d456ad1badfcb3dd")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cdf8d3264f73f918d87c6770385da23f5dda0a54")]
 [assembly: System.Reflection.AssemblyProductAttribute("HmdPipeExample")]
 [assembly: System.Reflection.AssemblyTitleAttribute("HmdPipeExample")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

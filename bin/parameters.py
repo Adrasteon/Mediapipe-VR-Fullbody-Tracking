@@ -58,6 +58,10 @@ class Parameters():
         self.euler_rot_z = 180.0
         self.posescale = 1.0 # Default scale
 
+        # --- Keyboard Control Defaults ---
+        self.keyboard_head_control_enabled = False # Default disabled
+        self.keyboard_head_control_speed = 1.5     # Default speed (degrees per tick)
+
         self.exit_ready = False # Flag to signal exit request
         self.paused = False # Flag for pausing tracking
         self.flip = False # Flag for flipping calibration rotation
@@ -167,6 +171,22 @@ class Parameters():
         logging.info(f"Image mirror set to {is_mirrored}")
         self.mirror = is_mirrored
 
+    # --- Keyboard Control Callbacks (Add if needed for GUI) ---
+    # def change_keyboard_control_enabled(self, enabled):
+    #     is_enabled = bool(enabled)
+    #     logging.info(f"Keyboard head control set to {is_enabled}")
+    #     self.keyboard_head_control_enabled = is_enabled
+    #     # Note: Actual enabling/disabling happens via keyboard_helper module
+
+    # def change_keyboard_control_speed(self, speed):
+    #     new_speed = float(speed)
+    #     if new_speed > 0:
+    #         logging.info(f"Keyboard head control speed set to {new_speed}")
+    #         self.keyboard_head_control_speed = new_speed
+    #     else:
+    #         logging.warning("Keyboard head control speed must be positive.")
+    #     # Note: Actual speed setting happens via keyboard_helper module
+
     def ready2exit(self):
         """Signals the main loop to exit."""
         self.exit_ready = True
@@ -190,7 +210,10 @@ class Parameters():
             "flip": self.flip,
             "hmd_to_neck_offset": self.hmd_to_neck_offset,
             "mirror": self.mirror,
-            "use_face": self.use_face # Save face tracking flag
+            "use_face": self.use_face, # Save face tracking flag
+            # --- Save Keyboard Control Params ---
+            "keyboard_head_control_enabled": self.keyboard_head_control_enabled,
+            "keyboard_head_control_speed": self.keyboard_head_control_speed,
             # Add other parameters loaded initially if they should be saved
         }
 
@@ -232,6 +255,10 @@ class Parameters():
             self.flip = param.get("flip", self.flip)
             self.use_face = param.get("use_face", self.use_face) # Load face tracking flag
 
+            # --- Load Keyboard Control Params ---
+            self.keyboard_head_control_enabled = param.get("keyboard_head_control_enabled", self.keyboard_head_control_enabled)
+            self.keyboard_head_control_speed = param.get("keyboard_head_control_speed", self.keyboard_head_control_speed)
+
             logging.info("Parameters loaded successfully.")
 
         except FileNotFoundError:
@@ -246,6 +273,7 @@ if __name__ == "__main__":
     try:
         # Need a dummy getparams for direct execution
         def dummy_getparams():
+            # Include defaults for keyboard params here if needed for standalone test
             return {
                 "advanced": False, "model_complexity": 1, "smooth_landmarks": True,
                 "min_tracking_confidence": 0.5, "imgsize": 640, "camid": "0",
@@ -257,6 +285,8 @@ if __name__ == "__main__":
         getparams = dummy_getparams # Override for testing
         params_instance = Parameters()
         print("Parameters instance created with defaults/loaded values.")
+        print(f"Keyboard Control Enabled: {params_instance.keyboard_head_control_enabled}")
+        print(f"Keyboard Control Speed: {params_instance.keyboard_head_control_speed}")
         # params_instance.save_params() # Test saving
     except Exception as e:
         print(f"Error during direct execution test: {e}")

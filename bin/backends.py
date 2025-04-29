@@ -38,6 +38,12 @@ try:
         "MiddleSplay": "/avatar/parameters/RightMiddleSplay",
         "RingSplay": "/avatar/parameters/RightRingSplay",
     }
+    # OSC Input Addresses (Added from gesture implementation)
+    OSC_INPUT_USE_LEFT = "/input/UseLeft"
+    OSC_INPUT_GRAB_LEFT = "/input/GrabLeft"
+    OSC_INPUT_USE_RIGHT = "/input/UseRight"
+    OSC_INPUT_GRAB_RIGHT = "/input/GrabRight"
+
     OSC_AVAILABLE = True
 except ImportError:
     logging.warning(
@@ -49,6 +55,10 @@ except ImportError:
     osc_message_builder = None
     OSC_HAND_PARAMS_LEFT = {}
     OSC_HAND_PARAMS_RIGHT = {}
+    OSC_INPUT_USE_LEFT = ""
+    OSC_INPUT_GRAB_LEFT = ""
+    OSC_INPUT_USE_RIGHT = ""
+    OSC_INPUT_GRAB_RIGHT = ""
     OSC_AVAILABLE = False
 
 
@@ -84,7 +94,7 @@ class Backend(ABC):
         params,
         pose3d: np.ndarray,
         pose_rots: Optional[tuple], # Renamed from rots for clarity
-        processed_hand_data: Optional[Tuple[Optional[Dict[str, float]], Optional[Dict[str, float]]]],
+        processed_hand_data: Optional[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]], # Updated type hint
         face_landmarks: Optional[Any] # Accept face landmarks (currently unused)
     ) -> bool:
         """
@@ -94,7 +104,7 @@ class Backend(ABC):
             params: Application parameters.
             pose3d: Numpy array (N, 3) of the processed 3D pose skeleton.
             pose_rots: Tuple containing rotations for hip, left leg, right leg (or None).
-            processed_hand_data: Tuple containing (left_hand_dict, right_hand_dict) with finger data (or None).
+            processed_hand_data: Tuple containing (left_hand_dict, right_hand_dict) with finger/gesture data (or None).
             face_landmarks: MediaPipe face landmarks object (or None).
 
         Returns:
@@ -127,7 +137,7 @@ class DummyBackend(Backend):
         params,
         pose3d: np.ndarray,
         pose_rots: Optional[tuple],
-        processed_hand_data: Optional[Tuple[Optional[Dict[str, float]], Optional[Dict[str, float]]]],
+        processed_hand_data: Optional[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]],
         face_landmarks: Optional[Any]
     ) -> bool:
         # Log pose data if needed for debugging
@@ -226,6 +236,7 @@ class SteamVRBackend(Backend):
         numtrackers = 0
         parsed_count = False
         try:
+            # Robust parsing: Find "numtrackers" and look for the next digit string
             if "numtrackers" in numtrackers_response:
                 keyword_index = numtrackers_response.index("numtrackers")
                 for i in range(keyword_index + 1, len(numtrackers_response)):
@@ -292,7 +303,7 @@ class SteamVRBackend(Backend):
         params,
         pose3d: np.ndarray,
         pose_rots: Optional[tuple],
-        processed_hand_data: Optional[Tuple[Optional[Dict[str, float]], Optional[Dict[str, float]]]],
+        processed_hand_data: Optional[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]], # Updated type hint
         face_landmarks: Optional[Any] # Accept face landmarks (currently unused)
     ) -> bool:
         """Gets HMD pose, calculates offsets, and sends tracker updates to the SteamVR driver."""
@@ -328,12 +339,15 @@ class SteamVRBackend(Backend):
                         parsed_pos = np.array([safe_float(array[3]), safe_float(array[4]), safe_float(array[5])])
                         qx, qy, qz = safe_float(array[7]), safe_float(array[8]), safe_float(array[9])
                         qw = safe_float(array[6], default=1.0)
-                        parsed_rot = R.from_quat([qx, qy, qz, qw])
                         quat_norm = np.linalg.norm([qx, qy, qz, qw])
 
                         if np.isclose(quat_norm, 0.0):
                             logging.warning(f"Parsed HMD quaternion is near zero {([qx, qy, qz, qw])}. Using last known rotation.")
                         else:
+                            # Normalize quaternion just in case
+                            if not np.isclose(quat_norm, 1.0):
+                                qx, qy, qz, qw = qx/quat_norm, qy/quat_norm, qz/quat_norm, qw/quat_norm
+                            parsed_rot = R.from_quat([qx, qy, qz, qw])
                             headsetpos = parsed_pos
                             headsetrot = parsed_rot
                             new_data_received = True
@@ -377,15 +391,19 @@ class SteamVRBackend(Backend):
                 if params.use_hands:
                     left_hand_rot = None
                     right_hand_rot = None
-                    # processed_hand_data is Tuple[Optional[Dict], Optional[Dict]]
-                    # We need the raw landmarks passed from mediapipepose.py for rotation calculation
-                    # Let's assume processed_hand_data now contains the raw landmarks:
-                    # processed_hand_data = (results.left_hand_landmarks, results.right_hand_landmarks)
-                    # **NOTE:** This requires changing the call in mediapipepose.py if it's sending curl dicts
-                    if processed_hand_data and processed_hand_data[0]: # Left hand landmarks
-                        left_hand_rot = self._calculate_hand_rotation_from_landmarks(processed_hand_data[0])
-                    if processed_hand_data and processed_hand_data[1]: # Right hand landmarks
-                        right_hand_rot = self._calculate_hand_rotation_from_landmarks(processed_hand_data[1])
+                    # NOTE: processed_hand_data contains dicts from process_holistic_hands
+                    # For SteamVR rotation, we need the raw landmarks. This part needs rethinking.
+                    # If we want accurate hand rotation in SteamVR, mediapipepose.py needs to pass
+                    # the raw results.left/right_hand_landmarks to this backend, perhaps as an
+                    # additional argument, or the SteamVR backend needs access to the 'results' object.
+                    # For now, hand rotation will likely be None or based on less accurate pose landmarks.
+                    # Let's assume for now it's None.
+                    # if processed_hand_data and processed_hand_data[0]: # Left hand data dict
+                    #     # Cannot calculate rotation from curl/splay dict
+                    #     pass
+                    # if processed_hand_data and processed_hand_data[1]: # Right hand data dict
+                    #     # Cannot calculate rotation from curl/splay dict
+                    #     pass
 
                     tracker_updates[steamvr_idx] = {"pose_idx": 10, "rot": left_hand_rot} # L Wrist
                     steamvr_idx += 1
@@ -396,15 +414,19 @@ class SteamVRBackend(Backend):
                 for idx, update_data in tracker_updates.items():
                     pose_idx = update_data["pose_idx"]
                     joint_pos = pose3d_scaled[pose_idx] - offset
-                    quat = update_data["rot"] if update_data["rot"] is not None else np.array([0.0, 0.0, 0.0, 1.0])
+                    # Scipy quat is [x, y, z, w], SteamVR expects [w, x, y, z]
+                    quat_xyzw = update_data["rot"] if update_data["rot"] is not None else np.array([0.0, 0.0, 0.0, 1.0])
 
-                    if not isinstance(quat, np.ndarray): quat = np.array(quat)
-                    norm = np.linalg.norm(quat)
-                    if np.isclose(norm, 0.0): quat = np.array([0.0, 0.0, 0.0, 1.0])
-                    elif not np.isclose(norm, 1.0): quat /= norm
+                    if not isinstance(quat_xyzw, np.ndarray): quat_xyzw = np.array(quat_xyzw)
+                    norm = np.linalg.norm(quat_xyzw)
+                    if np.isclose(norm, 0.0): quat_xyzw = np.array([0.0, 0.0, 0.0, 1.0]) # Default to identity if zero
+                    elif not np.isclose(norm, 1.0): quat_xyzw /= norm # Normalize if needed
+
+                    # Convert to WXYZ for SteamVR
+                    quat_wxyz = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
 
                     cmd = (f"updatepose {idx} {joint_pos[0]:.4f} {joint_pos[1]:.4f} {joint_pos[2]:.4f} "
-                           f"{quat[3]:.4f} {quat[0]:.4f} {quat[1]:.4f} {quat[2]:.4f} "
+                           f"{quat_wxyz[0]:.4f} {quat_wxyz[1]:.4f} {quat_wxyz[2]:.4f} {quat_wxyz[3]:.4f} "
                            f"{params.camera_latency:.4f} 0.8") # 0.8 = smoothing factor?
                     trackers_to_update.append(cmd)
 
@@ -413,7 +435,7 @@ class SteamVRBackend(Backend):
                 for i in range(num_points_to_send):
                     joint_pos = pose3d_scaled[i] - offset
                     cmd = (f"updatepose {i} {joint_pos[0]:.4f} {joint_pos[1]:.4f} {joint_pos[2] - 2.0:.4f} " # Z offset for viz
-                           f"1.0 0 0 0 {params.camera_latency:.4f} 0.8")
+                           f"1.0 0 0 0 {params.camera_latency:.4f} 0.8") # Send identity rotation
                     trackers_to_update.append(cmd)
 
             # Send all update commands
@@ -448,17 +470,26 @@ def _build_osc_message(address: str, value: float) -> Optional[Any]:
         logging.error(f"Failed to build OSC message for {address}: {e}")
         return None
 
+def _osc_build_msg(name: str, type: str, value: List[float]) -> Optional[Any]:
+    """Helper to build OSC position/rotation messages."""
+    if osc_message_builder is None: return None
+    address = f"/tracking/trackers/{name}/{type}"
+    builder = osc_message_builder.OscMessageBuilder(address=address)
+    for val in value:
+        builder.add_arg(float(val))
+    return builder.build()
+
 def _build_osc_tracking_bundle(trackers: List[Dict[str, Any]]) -> Optional[Any]:
     """Builds an OSC bundle for VRChat tracker positions/rotations."""
     if osc_bundle_builder is None or not trackers: return None
     try:
         builder = osc_bundle_builder.OscBundleBuilder(osc_bundle_builder.IMMEDIATELY)
-        # Head message (position only)
-        head_msg = _osc_build_msg(trackers[0]['name'], "position", trackers[0]['position'])
-        if head_msg: builder.add_content(head_msg)
+        # Head message (position only) - VRChat uses HMD position directly, no need to send head tracker
+        # head_msg = _osc_build_msg(trackers[0]['name'], "position", trackers[0]['position'])
+        # if head_msg: builder.add_content(head_msg)
 
-        # Other trackers (position and rotation)
-        for tracker in trackers[1:]:
+        # Body trackers (position and rotation)
+        for tracker in trackers: # Start from first actual tracker
             pos_msg = _osc_build_msg(tracker['name'], "position", tracker['position'])
             rot_msg = _osc_build_msg(tracker['name'], "rotation", tracker['rotation'])
             if pos_msg: builder.add_content(pos_msg)
@@ -468,20 +499,23 @@ def _build_osc_tracking_bundle(trackers: List[Dict[str, Any]]) -> Optional[Any]:
         logging.error(f"Failed to build OSC tracking bundle: {e}")
         return None
 
-def _build_osc_parameter_bundle(hand_data: Dict[str, float], param_map: Dict[str, str]) -> Optional[Any]:
-    """Builds an OSC bundle for VRChat avatar parameters (e.g., finger curls)."""
+def _build_osc_parameter_bundle(hand_data: Dict[str, Any], param_map: Dict[str, str]) -> Optional[Any]:
+    """Builds an OSC bundle for VRChat avatar parameters (e.g., finger curls/gestures)."""
     if osc_bundle_builder is None or not hand_data: return None
     try:
         builder = osc_bundle_builder.OscBundleBuilder(osc_bundle_builder.IMMEDIATELY)
         for key, value in hand_data.items():
+            # Only send parameters that have a mapping and are not None
             if value is not None and key in param_map:
                 address = param_map[key]
-                msg = _build_osc_message(address, value)
+                # Ensure value is float for OSC
+                msg = _build_osc_message(address, float(value))
                 if msg:
                     builder.add_content(msg)
-        return builder.build()
+        # Return bundle only if it has content
+        return builder.build() if builder._contents else None
     except Exception as e:
-        logging.error(f"Failed to build OSC parameter bundle: {e}")
+        logging.error(f"Failed to build OSC parameter bundle for keys {list(hand_data.keys())}: {e}")
         return None
 
 
@@ -492,6 +526,9 @@ class VRChatOSCBackend(Backend):
         logging.info("Initializing VRChat OSC Backend.")
         self.client: Optional[udp_client.UDPClient] = None
         self.prev_pose3d: np.ndarray = np.zeros((29, 3), dtype=np.float32) # For smoothing
+        # Counter for logging preview mode warning
+        self._preview_log_counter = 0
+        self._log_interval = 100 # How often to log the warning (e.g., every 100 calls)
 
     def onparamchanged(self, params) -> None:
         # Smoothing is handled internally in updatepose for OSC
@@ -509,6 +546,9 @@ class VRChatOSCBackend(Backend):
         logging.info(f"Connecting VRChat OSC client to {ip}:{port}")
         try:
             self.client = udp_client.UDPClient(ip, port)
+            # Optional: Send a test message on connect?
+            # test_msg = _build_osc_message("/avatar/parameters/TrackingActive", 1.0)
+            # if test_msg: self.client.send(test_msg)
         except Exception as e:
             logging.error(f"Failed to create UDP client for VRChat OSC: {e}")
             shutdown(params, exit_code=1)
@@ -518,7 +558,7 @@ class VRChatOSCBackend(Backend):
         params,
         pose3d: np.ndarray,
         pose_rots: Optional[tuple],
-        processed_hand_data: Optional[Tuple[Optional[Dict[str, float]], Optional[Dict[str, float]]]],
+        processed_hand_data: Optional[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]], # Updated type hint
         face_landmarks: Optional[Any] # Accept face landmarks (currently unused)
     ) -> bool:
         """Applies smoothing, calculates offsets, formats, and sends tracker/parameter data via OSC."""
@@ -528,33 +568,34 @@ class VRChatOSCBackend(Backend):
 
         try:
             # --- Coordinate System Adjustments for VRChat OSC ---
+            # VRChat expects: +X Right, +Y Up, +Z Forward
+            # Input pose3d (after mediapipepose adjustments) is: +X Left, +Y Down, +Z Towards
             pose3d_osc = pose3d.copy()
             pose3d_osc[:, 0] *= -1.0 # Flip X (Left -> Right)
+            # Y is already flipped in mediapipepose.py (pose3d[:, 1] *= -1), so it's now UP
             pose3d_osc[:, 2] *= -1.0 # Flip Z (Towards -> Forward)
 
-            # Apply smoothing
+            # Apply smoothing (Exponential Moving Average)
             alpha = np.clip(params.additional_smoothing, 0.0, 1.0)
             pose3d_smoothed = self.prev_pose3d * alpha + pose3d_osc * (1.0 - alpha)
             self.prev_pose3d = pose3d_smoothed
 
-            # --- Offset Calculation (Relative to playspace origin) ---
-            headsetpos = np.array([0.0, 0.0, 0.0]) # Assume HMD is origin for offset calc
-            headsetrot = R.identity()
-            neckoffset = headsetrot.apply(params.hmd_to_neck_offset)
+            # --- Offset Calculation (Relative to playspace origin/HMD) ---
+            # For OSC, we generally send world-space coordinates relative to the HMD/origin.
+            # The offset calculation might be simpler or different than SteamVR's tracker offset.
+            # Let's assume the HMD is at (0,0,0) in the tracking space for simplicity.
+            # The pose3d_smoothed is already relative to the HMD if calibration was done correctly.
+            # We just need to apply the scale.
+            pose3d_final = pose3d_smoothed * params.posescale
 
             if params.recalibrate:
                 logging.debug("Recalibration pending, skipping OSC pose update.")
                 return False
 
-            pose3d_final = pose3d_smoothed * params.posescale
-            offset = pose3d_final[7] - (headsetpos + neckoffset) # Offset relative to mid-shoulder
-
             # --- Prepare and Send OSC Tracking Bundle ---
             if not params.preview_skeleton:
                 trackers_osc: List[Dict[str, Any]] = []
-                trackers_osc.append({"name": "head", "position": [0.0, 0.0, 0.0]}) # Head required
-
-                osc_idx = 1
+                osc_idx = 1 # VRChat tracker names are typically "1", "2", "3" etc.
                 tracker_map: Dict[int, Dict[str, Any]] = {} # {pose_idx: {osc_name: ..., rot: ...}}
 
                 # Body Trackers
@@ -569,19 +610,29 @@ class VRChatOSCBackend(Backend):
 
                 # Build tracker list for bundle
                 for pose_idx, osc_data in tracker_map.items():
-                    position = pose3d_final[pose_idx] - offset
-                    quat = osc_data["rot"] if osc_data["rot"] is not None else np.array([0.0, 0.0, 0.0, 1.0])
-                    if not isinstance(quat, np.ndarray): quat = np.array(quat)
+                    position = pose3d_final[pose_idx] # Position relative to HMD/origin
+                    # Scipy quat is [x, y, z, w]
+                    quat_xyzw = osc_data["rot"] if osc_data["rot"] is not None else np.array([0.0, 0.0, 0.0, 1.0])
+                    if not isinstance(quat_xyzw, np.ndarray): quat_xyzw = np.array(quat_xyzw)
 
-                    # Convert rotation to Euler angles (degrees) for OSC (ZXY order)
+                    # Convert rotation to Euler angles (degrees) for OSC (VRChat uses ZXY order: Yaw, Pitch, Roll)
                     try:
-                        norm = np.linalg.norm(quat)
+                        norm = np.linalg.norm(quat_xyzw)
                         if np.isclose(norm, 0.0): final_rotation = [0.0, 0.0, 0.0]
                         else:
-                            if not np.isclose(norm, 1.0): quat /= norm
-                            rotation_euler = R.from_quat(quat).as_euler("zxy", degrees=True)
-                            final_rotation = [rotation_euler[0], rotation_euler[1], rotation_euler[2]] # Yaw, Pitch, Roll
-                    except ValueError: final_rotation = [0.0, 0.0, 0.0]
+                            if not np.isclose(norm, 1.0): quat_xyzw /= norm
+                            # Apply coordinate system rotation for Euler angles if needed
+                            # Input quat is relative to (+X Left, +Y Down, +Z Towards) frame?
+                            # Target frame is (+X Right, +Y Up, +Z Forward)
+                            # Let's assume the quat represents rotation in the TARGET frame already
+                            # due to global rotations applied in mediapipepose.py
+                            rotation_euler = R.from_quat(quat_xyzw).as_euler("zxy", degrees=True)
+                            # VRChat OSC rotation: Yaw (Z), Pitch (X), Roll (Y) ?? Check docs.
+                            # Assuming ZXY order based on common usage:
+                            final_rotation = [rotation_euler[0], rotation_euler[1], rotation_euler[2]]
+                    except ValueError:
+                        logging.warning(f"OSC: ValueError converting quaternion {quat_xyzw} to Euler. Sending [0,0,0].")
+                        final_rotation = [0.0, 0.0, 0.0]
 
                     trackers_osc.append({
                         "name": osc_data['osc_name'],
@@ -595,24 +646,55 @@ class VRChatOSCBackend(Backend):
                     self.client.send(tracking_bundle)
 
             else: # Preview skeleton mode not implemented for OSC
-                logging.log_every_n(logging.WARNING, "OSC Preview skeleton mode is not implemented.", 100) # Log less frequently
+                # --- Implement logging counter ---
+                self._preview_log_counter += 1
+                if self._preview_log_counter >= self._log_interval:
+                    logging.warning("OSC Preview skeleton mode is not implemented.")
+                    self._preview_log_counter = 0 # Reset counter
+                # --- End logging counter implementation ---
 
 
-            # --- Prepare and Send OSC Parameter Bundles (Hands) ---
+            # --- Prepare and Send OSC Parameter Bundles (Hands/Gestures) ---
             if params.use_hands and processed_hand_data:
                 left_hand_dict, right_hand_dict = processed_hand_data
 
-                # Send Left Hand Parameters
+                # --- Build Input Bundle (Gestures) ---
+                input_bundle_builder = osc_bundle_builder.OscBundleBuilder(osc_bundle_builder.IMMEDIATELY)
+                input_added = False
+
                 if left_hand_dict:
+                    # Send Parameters (Curls/Splays)
                     left_param_bundle = _build_osc_parameter_bundle(left_hand_dict, OSC_HAND_PARAMS_LEFT)
                     if left_param_bundle:
                         self.client.send(left_param_bundle)
 
-                # Send Right Hand Parameters
+                    # Add Inputs (Gestures) to separate bundle
+                    pinch_val = left_hand_dict.get('PinchStrength', 0.0) # Default to 0.0 if missing
+                    grab_val = left_hand_dict.get('GrabStrength', 0.0)
+                    use_msg = _build_osc_message(OSC_INPUT_USE_LEFT, pinch_val)
+                    grab_msg = _build_osc_message(OSC_INPUT_GRAB_LEFT, grab_val)
+                    if use_msg: input_bundle_builder.add_content(use_msg); input_added = True
+                    if grab_msg: input_bundle_builder.add_content(grab_msg); input_added = True
+
                 if right_hand_dict:
+                    # Send Parameters (Curls/Splays)
                     right_param_bundle = _build_osc_parameter_bundle(right_hand_dict, OSC_HAND_PARAMS_RIGHT)
                     if right_param_bundle:
                         self.client.send(right_param_bundle)
+
+                    # Add Inputs (Gestures) to separate bundle
+                    pinch_val = right_hand_dict.get('PinchStrength', 0.0)
+                    grab_val = right_hand_dict.get('GrabStrength', 0.0)
+                    use_msg = _build_osc_message(OSC_INPUT_USE_RIGHT, pinch_val)
+                    grab_msg = _build_osc_message(OSC_INPUT_GRAB_RIGHT, grab_val)
+                    if use_msg: input_bundle_builder.add_content(use_msg); input_added = True
+                    if grab_msg: input_bundle_builder.add_content(grab_msg); input_added = True
+
+                # Send Input Bundle if any inputs were added
+                if input_added:
+                    input_bundle = input_bundle_builder.build()
+                    self.client.send(input_bundle)
+
 
             # --- Face Landmark Processing (Placeholder) ---
             if params.use_face and face_landmarks:
@@ -630,4 +712,8 @@ class VRChatOSCBackend(Backend):
     def disconnect(self) -> None:
         """Closes the UDP client."""
         logging.info("Disconnecting VRChat OSC client.")
+        # Optional: Send a message indicating tracking stopped?
+        # if self.client:
+        #     test_msg = _build_osc_message("/avatar/parameters/TrackingActive", 0.0)
+        #     if test_msg: self.client.send(test_msg)
         self.client = None
